@@ -3,12 +3,15 @@
 namespace Utarwyn\Jenkins\Server;
 
 use GuzzleHttp\Client;
+use GuzzleHttp\Exception\BadResponseException;
 use GuzzleHttp\Exception\GuzzleException;
+use GuzzleHttp\Exception\RequestException;
 use Psr\Http\Message\ResponseInterface;
 use Utarwyn\Jenkins\Error\ConnectionErrorException;
 
 /**
  * Class ApiClient
+ *
  * @package Utarwyn\Jenkins\Server
  */
 class ApiClient
@@ -45,27 +48,32 @@ class ApiClient
 
     /**
      * ApiClient constructor.
+     *
      * @param string $jenkinsUrl Jenkins base URL
-     * @param string $username Username to connect to the Jenkins API
-     * @param string $apiToken Token to connect to the Jenkins API
+     * @param string $username   Username to connect to the Jenkins API
+     * @param string $apiToken   Token to connect to the Jenkins API
      */
     public function __construct(string $jenkinsUrl, string $username, string $apiToken)
     {
-        $this->jenkinsUrl = $jenkinsUrl;
+        $this->jenkinsUrl      = $jenkinsUrl;
         $this->jenkinsUsername = $username;
         $this->jenkinsApiToken = $apiToken;
 
         // Configure the Guzzle client to access to the remote Jenkins api
-        $this->client = new Client([
-            'base_uri' => $jenkinsUrl,
-            'verify' => false
-        ]);
+        $this->client = new Client(
+            [
+                'base_uri' => $jenkinsUrl,
+                'verify'   => false,
+            ]
+        );
     }
 
     /**
      * @param string $action Action where we want information
-     * @param bool $plain Should data be retreived in the plain format?
+     * @param bool   $plain  Should data be retreived in the plain format?
+     *
      * @return Object|string|null Returned data by the API
+     * @throws ConnectionErrorException
      */
     public function get(string $action, bool $plain = false)
     {
@@ -78,6 +86,7 @@ class ApiClient
 
         if ($response->getStatusCode() === 200) {
             $content = $response->getBody()->getContents();
+
             return (!$plain) ? json_decode($content) : $content;
         }
 
@@ -86,10 +95,12 @@ class ApiClient
 
     /**
      * @param string $action Action where we want to post information
-     * @param array $params Params to post to the Jenkins action
+     * @param array  $params Params to post to the Jenkins action
+     *
      * @return ResponseInterface The response of the Jenkins API
+     * @throws ConnectionErrorException
      */
-    public function post(string $action, array $params = array()): ResponseInterface
+    public function post(string $action, array $params = []): ResponseInterface
     {
         return $this->request("POST", $action, $params);
     }
@@ -105,21 +116,23 @@ class ApiClient
     /**
      * @param string $method HTTP Method of the request
      * @param string $action Action where the request has to be done
-     * @param array $params Params to pass through the request
+     * @param array  $params Params to pass through the request
+     *
      * @return ResponseInterface The response of the Jenkins API
+     * @throws ConnectionErrorException
      */
-    private function request(string $method, string $action, array $params = array()) : ResponseInterface
+    private function request(string $method, string $action, array $params = []): ResponseInterface
     {
         // Get crumb data to securise the request
         $crumb = $this->getCrumbData();
 
         try {
-            $params = array(
-                "headers" => array(
-                    $crumb->getRequestField(), $crumb->getCrumb()
-                ),
-                "form_params" => $params
-            );
+            $params = [
+                "headers"     => [
+                    $crumb->getRequestField(), $crumb->getCrumb(),
+                ],
+                "form_params" => $params,
+            ];
 
             // Ajout de l'en-tête d'authentification si la connexion est nécessaire
             if (!empty($this->jenkinsUsername) && !empty($this->jenkinsApiToken)) {
@@ -127,15 +140,18 @@ class ApiClient
             }
 
             return $this->client->request($method, $this->getActionEndpoint($action), $params);
+        } catch (RequestException | BadResponseException $e) {
+            throw new ConnectionErrorException($action, $e->getResponse(), $e);
         } catch (GuzzleException $e) {
-            $r = $e->getResponse();
-            throw new ConnectionErrorException("{$r->getStatusCode()} error ({$r->getReasonPhrase()}) when trying to access action {$action}.");
+            throw new ConnectionErrorException($action, null, $e);
         }
     }
 
     /**
      * Generate the Jenkins API endpoint of an action.
+     *
      * @param string $action Path to resolve inside the Jenkins API
+     *
      * @return string Formatted action endpoint
      */
     private function getActionEndpoint(string $action): string
@@ -160,14 +176,15 @@ class ApiClient
 
     /**
      * @return CrumbData Authentication data used by the Jenkins API
+     * @throws ConnectionErrorException
      */
-    private function getCrumbData() : CrumbData
+    private function getCrumbData(): CrumbData
     {
         if (!is_null($this->jenkinsCrumbData)) {
             return $this->jenkinsCrumbData;
         }
 
-        $params = array();
+        $params = [];
 
         // Ajout de l'en-tête d'authentification si nécessaire
         if (!empty($this->jenkinsUsername) && !empty($this->jenkinsApiToken)) {
@@ -180,10 +197,11 @@ class ApiClient
             $status = $response->getStatusCode();
 
             if ($status === 200) {
-                $data = \GuzzleHttp\json_decode($response->getBody()->getContents());
+                $data  = \GuzzleHttp\json_decode($response->getBody()->getContents());
                 $crumb = new CrumbData($data->crumbRequestField, $data->crumb);
-    
+
                 $this->jenkinsCrumbData = $crumb;
+
                 return $crumb;
             } else {
                 throw new ConnectionErrorException("{$this->jenkinsUrl} returns a {$status} HTTP code");

@@ -2,11 +2,12 @@
 
 namespace Utarwyn\Jenkins\Entity;
 
+use Utarwyn\Jenkins\Error\ConnectionErrorException;
 use Utarwyn\Jenkins\JenkinsEntity;
-use Utarwyn\Jenkins\Server\ApiClient;
 
 /**
  * Class Queue
+ *
  * @package Utarwyn\Jenkins\Entity
  */
 class Queue extends JenkinsEntity
@@ -47,5 +48,16 @@ class Queue extends JenkinsEntity
         }
 
         return null;
+    }
+
+    public function pullItem(int $id): ?QueueItem
+    {
+        try {
+            $object = $this->client->get(sprintf('queue/item/%u', $id));
+        } catch (ConnectionErrorException $e) {
+            return null;
+        }
+
+        return new QueueItem($object);
     }
 }

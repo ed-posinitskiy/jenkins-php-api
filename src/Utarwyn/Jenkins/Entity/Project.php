@@ -3,10 +3,12 @@
 namespace Utarwyn\Jenkins\Entity;
 
 use Exception;
+use Utarwyn\Jenkins\Error\ConnectionErrorException;
 use Utarwyn\Jenkins\JenkinsEntity;
 
 /**
  * Class Project
+ *
  * @package Utarwyn\Jenkins\Entity
  */
 class Project extends JenkinsEntity
@@ -157,12 +159,13 @@ class Project extends JenkinsEntity
 
     /**
      * @param int $id
+     *
      * @return Build
      */
     public function getBuild(int $id): Build
     {
         try {
-            return new Build($this, $id);
+            return new Build($this->client, $this, $id);
         } catch (Exception $e) {
             return null;
         }
@@ -173,7 +176,7 @@ class Project extends JenkinsEntity
      */
     public function getFirstBuild()
     {
-        return Project::getBuildFromJson($this, "firstBuild");
+        return $this->getBuildFromJson($this, "firstBuild");
     }
 
     /**
@@ -181,7 +184,7 @@ class Project extends JenkinsEntity
      */
     public function getLastBuild()
     {
-        return Project::getBuildFromJson($this, "lastBuild");
+        return $this->getBuildFromJson($this, "lastBuild");
     }
 
     /**
@@ -189,7 +192,7 @@ class Project extends JenkinsEntity
      */
     public function getLastCompletedBuild()
     {
-        return Project::getBuildFromJson($this, "lastCompletedBuild");
+        return $this->getBuildFromJson($this, "lastCompletedBuild");
     }
 
     /**
@@ -197,7 +200,7 @@ class Project extends JenkinsEntity
      */
     public function getLastFailedBuild()
     {
-        return Project::getBuildFromJson($this, "lastFailedBuild");
+        return $this->getBuildFromJson($this, "lastFailedBuild");
     }
 
     /**
@@ -205,7 +208,7 @@ class Project extends JenkinsEntity
      */
     public function getLastStableBuild()
     {
-        return Project::getBuildFromJson($this, "lastStableBuild");
+        return $this->getBuildFromJson($this, "lastStableBuild");
     }
 
     /**
@@ -213,7 +216,7 @@ class Project extends JenkinsEntity
      */
     public function getLastSuccessful()
     {
-        return Project::getBuildFromJson($this, "lastSuccessfulBuild");
+        return $this->getBuildFromJson($this, "lastSuccessfulBuild");
     }
 
     /**
@@ -221,7 +224,7 @@ class Project extends JenkinsEntity
      */
     public function getLastUnstableBuild()
     {
-        return Project::getBuildFromJson($this, "lastUnstableBuild");
+        return $this->getBuildFromJson($this, "lastUnstableBuild");
     }
 
     /**
@@ -229,7 +232,7 @@ class Project extends JenkinsEntity
      */
     public function getLastUnsuccessfulBuild()
     {
-        return Project::getBuildFromJson($this, "lastUnsuccessfulBuild");
+        return $this->getBuildFromJson($this, "lastUnsuccessfulBuild");
     }
 
     /**
@@ -244,19 +247,47 @@ class Project extends JenkinsEntity
     {
         return $this->builds;
     }
-    /**
-     * @param Project $project
-     * @param $jsonKey
-     * @return null|Build
-     */
-    private static function getBuildFromJson(Project $project, $jsonKey)
-    {
-        $buildObj = $project->getData()->$jsonKey;
 
-        if (empty($buildObj)) {
+    /**
+     * @param array $params
+     *
+     * @return QueueItem|null
+     * @throws ConnectionErrorException
+     */
+    public function runBuild(array $params = []): ?QueueItem
+    {
+        $target = empty($params) ? 'build' : 'buildWithParameters';
+        $url    = sprintf('job/%s/%s', $this->name, $target);
+
+        try {
+            $response = $this->client->post($url, $params);
+        } catch (ConnectionErrorException $e) {
             return null;
         }
 
-        return new Build($this->client, $project, $buildObj->number);
+        if ($response->getStatusCode() !== 201) {
+            return null;
+        }
+
+        $location = parse_url($response->getHeaderLine('Location'), PHP_URL_PATH);
+
+        if (empty($location)) {
+            return null;
+        }
+
+        return new QueueItem($this->client->get($location));
+    }
+
+    /**
+     * @param Project $project
+     * @param         $jsonKey
+     *
+     * @return null|Build
+     */
+    private function getBuildFromJson(Project $project, $jsonKey)
+    {
+        $buildObj = $project->getData()->$jsonKey;
+
+        return $this->getBuild($buildObj->number);
     }
 }
